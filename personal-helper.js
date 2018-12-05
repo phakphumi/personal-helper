@@ -16,21 +16,27 @@ const app = express();
 app.use(bodyParser.json());
 
 app.post('/webhook', (req, res) => {
-  const event = head(get(['body', 'events'])(req));
-  const text = get(['message', 'text'])(event);
   const lineConfig = getLineConfig(req);
-  console.log(text);
-  console.log(lineConfig);
+  const client = new Client(lineConfig);
+  const event = head(get(['body', 'events'])(req));
+  const callingMessage = get(['message', 'text'])(event);
+  const { replyToken } = event;
+  client.replyMessage(replyToken, toLineMessage(callingMessage));
   res.sendStatus(200);
 });
 
-const getLineConfig = (req) => {
-  const context = get(['webtaskContext'])(req);
-  console.log(context);
-  return {
-    channelAccessToken: get(['secrets', 'LINE_CHANNEL_ACCESS_TOKEN'])(context),
-    channelSecret: get(['secrets', 'LINE_CHANNEL_SECRET'])(context),
-  };
+const toLineMessage = (message) => {
+  if(!message) { message = '...'; }
+  return [{
+    type: 'text',
+    text: message,
+  }];
 };
+
+const getLineConfig = ({ webtaskContext }) => ({
+  // get env which set on webtask secrets
+  channelAccessToken: get(['secrets', 'LINE_CHANNEL_ACCESS_TOKEN'])(webtaskContext),
+  channelSecret: get(['secrets', 'LINE_CHANNEL_SECRET'])(webtaskContext),
+});
 
 module.exports = Webtask.fromExpress(app);
