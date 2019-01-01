@@ -12,7 +12,8 @@ import {
   get,
   head,
   reduce,
-  isObject,
+  split,
+  toUpper,
 } from 'lodash/fp';
 
 const app = express();
@@ -43,8 +44,8 @@ app.post('/webhook', (req, res) => {
         addSpendingRecord({
           userId: get(['source', 'userId'])(event),
           secrets,
-          callback: ({ amount, category }) => {
-            client.replyMessage(replyToken, toLineMessage({ message: `Recorded expense ${amount} baht on ${category}`}));
+          callback: ({ amount, category, creditCard }) => {
+            client.replyMessage(replyToken, toLineMessage({ message: `Recorded expense ${amount} baht on ${category}${creditCard ? ` using ${creditCard} card` : ''}`}));
           },
           ...transformIncomingMessage({ message: callingMessage }),
         });
@@ -73,7 +74,8 @@ const getMappingCategory = () => ({
 });
 
 const transformIncomingMessage = ({ message }) => {
-  const matchedMessage = message.match(/^([\d.]+)([tfghmol])$/i);
+  const separatedMessage = split(' ')(message);
+  const matchedMessage = separatedMessage[0].match(/^([\d.]+)([bdfhmstw])$/i);
   if(!matchedMessage) {
     console.log('Incoming message has incorrect format');
     throw {
@@ -84,6 +86,7 @@ const transformIncomingMessage = ({ message }) => {
   let transformedMessage = {};
   transformedMessage.category = getMappingCategory()[matchedMessage[2].toLowerCase()];
   transformedMessage.amount = parseFloat(matchedMessage[1]);
+  transformedMessage.creditCard = toUpper(separatedMessage[1]);
   return transformedMessage;
 };
 
@@ -91,12 +94,14 @@ const addSpendingRecord = ({
   secrets: { AIRTABLE_API_KEY, AIRTABLE_PERSONAL_HELPER_BASE },
   userId,
   category,
+  creditCard,
   amount,
   callback,
 }) => {
   const base = new Airtable({ apiKey: AIRTABLE_API_KEY }).base(AIRTABLE_PERSONAL_HELPER_BASE);
   base('SpendingRecords').create({
     category,
+    creditCard,
     amount,
     userId,
     createdDate: moment.tz('Asia/Bangkok').format('YYYY-MM-DD'),
@@ -105,7 +110,11 @@ const addSpendingRecord = ({
       console.error(err);
       return;
     }
-    callback({ amount: get(['fields', 'amount'])(record), category: get(['fields', 'category'])(record) });
+    callback({
+      amount: get(['fields', 'amount'])(record),
+      category: get(['fields', 'category'])(record),
+      creditCard: get(['fields', 'creditCard'])(record),
+    });
   });
 };
 
