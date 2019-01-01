@@ -11,6 +11,7 @@ import {
 import {
   get,
   head,
+  reduce,
   isObject,
 } from 'lodash/fp';
 
@@ -26,23 +27,49 @@ app.post('/webhook', (req, res) => {
   const secrets = get(['webtaskContext', 'secrets'])(req);
   const { replyToken } = event;
 
-  try {
-    addSpendingRecord({
-      userId: get(['source', 'userId'])(event),
-      secrets,
-      callback: ({ amount, category }) => {
-        client.replyMessage(replyToken, toLineMessage({ message: `Recorded expense ${amount} baht on ${category}`}));
-      },
-      ...transformIncomingMessage({ message: callingMessage }),
-    });
-  } catch (error) {
-    console.log(error);
-    if(error.errorDesc) {
-      client.replyMessage(replyToken, toLineMessage({ message: error.errorDesc }));
-    }
-    return error;
+  switch (callingMessage.toLowerCase()) {
+    case 'category':
+      const reduceObjectWithKey = reduce.convert({ cap: false });
+      const toReplyCategory = reduceObjectWithKey((accumulator, value, key) => {
+        if(accumulator === '') {
+          return `${key}: ${value}`;
+        }
+        return accumulator + `\n${key}: ${value}`;
+      }, '')(getMappingCategory())
+      client.replyMessage(replyToken, toLineMessage({ message: toReplyCategory}));
+      break;
+    default:
+      try {
+        addSpendingRecord({
+          userId: get(['source', 'userId'])(event),
+          secrets,
+          callback: ({ amount, category }) => {
+            client.replyMessage(replyToken, toLineMessage({ message: `Recorded expense ${amount} baht on ${category}`}));
+          },
+          ...transformIncomingMessage({ message: callingMessage }),
+        });
+      } catch (error) {
+        console.log(error);
+        if(error.errorDesc) {
+          client.replyMessage(replyToken, toLineMessage({ message: error.errorDesc }));
+        }
+        return error;
+      }
+      break;
   }
+
   res.sendStatus(200);
+});
+
+const getMappingCategory = () => ({
+  b: 'bills',
+  d: 'drink',
+  f: 'food',
+  h: 'health',
+  m: 'miscellaneous',
+  s: 'snack',
+  t: 'transportation',
+  w: 'washing',
 });
 
 const transformIncomingMessage = ({ message }) => {
@@ -55,15 +82,7 @@ const transformIncomingMessage = ({ message }) => {
     };
   }
   let transformedMessage = {};
-  transformedMessage.category = {
-    d: 'drink',
-    f: 'food',
-    h: 'health',
-    m: 'miscellaneous',
-    o: 'occasion',
-    s: 'snack',
-    t: 'transportation',
-  }[matchedMessage[2].toLowerCase()];
+  transformedMessage.category = getMappingCategory()[matchedMessage[2].toLowerCase()];
   transformedMessage.amount = parseFloat(matchedMessage[1]);
   return transformedMessage;
 };
