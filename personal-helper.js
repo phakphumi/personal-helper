@@ -44,19 +44,36 @@ app.post('/webhook', (req, res) => {
       }, '')(getMappingCategory())
       client.replyMessage(replyToken, toLineMessage({ message: toReplyCategory}));
       break;
-    case 'edit':
-      const separatedMessage = split(' ')(callingMessage);
-      const recordId = separatedMessage[1];
-      const orderDetail = join(' ')(slice(2, separatedMessage.length)(separatedMessage));
-      replace('edit ', '')(callingMessage);
-      editSpendingRecord({
+    case 'delete':
+      const recordId = split(' ')(callingMessage)[1];
+      deleteSpendingRecord({
         secrets,
         recordId,
         toReply: ({ replyMessage }) => {
           client.replyMessage(replyToken, toLineMessage({ message: replyMessage }));
-        },
-        ...transformIncomingMessage({ message: orderDetail }),
+        }
       })
+      break;
+    case 'edit':
+      try {
+        const separatedMessage = split(' ')(callingMessage);
+        const recordId = separatedMessage[1];
+        const orderDetail = join(' ')(slice(2, separatedMessage.length)(separatedMessage));
+        editSpendingRecord({
+          secrets,
+          recordId,
+          toReply: ({ replyMessage }) => {
+            client.replyMessage(replyToken, toLineMessage({ message: replyMessage }));
+          },
+          ...transformIncomingMessage({ message: orderDetail }),
+        });
+      } catch (error) {
+        console.log(error);
+        if(error.errorDesc) {
+          client.replyMessage(replyToken, toLineMessage({ message: error.errorDesc }));
+        }
+        return error;
+      }
       break;
     default:
       try {
@@ -141,6 +158,23 @@ const addSpendingRecord = ({
   });
 };
 
+const deleteSpendingRecord = ({
+  secrets: { AIRTABLE_API_KEY, AIRTABLE_PERSONAL_HELPER_BASE },
+  recordId,
+  toReply,
+}) => {
+  const base = new Airtable({ apiKey: AIRTABLE_API_KEY }).base(AIRTABLE_PERSONAL_HELPER_BASE);
+  base('SpendingRecords').destroy(recordId, function(err, deletedRecord) {
+    if (err) {
+      console.error(err);
+      return;
+    }
+    toReply({
+      replyMessage: `Deleted record ${deletedRecord.id}`,
+    });
+});
+}
+
 const editSpendingRecord = ({
   secrets: { AIRTABLE_API_KEY, AIRTABLE_PERSONAL_HELPER_BASE },
   recordId,
@@ -166,7 +200,7 @@ const editSpendingRecord = ({
       creditCard
     } = get(['fields'])(record);
     toReply({
-      replyMessage: `Updated record id: ${recordId}\nPay ${amount} baht for ${category}${creditCard ? ` using ${creditCard} card` : ''}`
+      replyMessage: `Updated record ${recordId}\nPay ${amount} baht for ${category}${creditCard ? ` using ${creditCard} card` : ''}`
     });
   })
 }
