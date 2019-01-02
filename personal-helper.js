@@ -11,9 +11,13 @@ import {
 import {
   get,
   head,
+  join,
   reduce,
+  replace,
+  slice,
   split,
   toUpper,
+  toLower,
 } from 'lodash/fp';
 
 const app = express();
@@ -28,7 +32,8 @@ app.post('/webhook', (req, res) => {
   const secrets = get(['webtaskContext', 'secrets'])(req);
   const { replyToken } = event;
 
-  switch (callingMessage.toLowerCase()) {
+  const orderToken = split(' ')(callingMessage)[0];
+  switch (toLower(orderToken)) {
     case 'category':
       const reduceObjectWithKey = reduce.convert({ cap: false });
       const toReplyCategory = reduceObjectWithKey((accumulator, value, key) => {
@@ -39,13 +44,27 @@ app.post('/webhook', (req, res) => {
       }, '')(getMappingCategory())
       client.replyMessage(replyToken, toLineMessage({ message: toReplyCategory}));
       break;
+    case 'edit':
+      const separatedMessage = split(' ')(callingMessage);
+      const recordId = separatedMessage[1];
+      const orderDetail = join(' ')(slice(2, separatedMessage.length)(separatedMessage));
+      replace('edit ', '')(callingMessage);
+      editSpendingRecord({
+        secrets,
+        recordId,
+        toReply: ({ replyMessage }) => {
+          client.replyMessage(replyToken, toLineMessage({ message: replyMessage }));
+        },
+        ...transformIncomingMessage({ message: orderDetail }),
+      })
+      break;
     default:
       try {
         addSpendingRecord({
           userId: get(['source', 'userId'])(event),
           secrets,
-          callback: ({ amount, category, creditCard }) => {
-            client.replyMessage(replyToken, toLineMessage({ message: `Recorded expense ${amount} baht on ${category}${creditCard ? ` using ${creditCard} card` : ''}`}));
+          toReply: ({ replyMessage }) => {
+            client.replyMessage(replyToken, toLineMessage({ message: replyMessage }));
           },
           ...transformIncomingMessage({ message: callingMessage }),
         });
@@ -96,7 +115,7 @@ const addSpendingRecord = ({
   category,
   creditCard,
   amount,
-  callback,
+  toReply,
 }) => {
   const base = new Airtable({ apiKey: AIRTABLE_API_KEY }).base(AIRTABLE_PERSONAL_HELPER_BASE);
   base('SpendingRecords').create({
@@ -110,13 +129,47 @@ const addSpendingRecord = ({
       console.error(err);
       return;
     }
-    callback({
-      amount: get(['fields', 'amount'])(record),
-      category: get(['fields', 'category'])(record),
-      creditCard: get(['fields', 'creditCard'])(record),
+    const recordId = record.getId();
+    const {
+      amount,
+      category,
+      creditCard
+    } = get(['fields'])(record);
+    toReply({
+      replyMessage: `Recorded id: ${recordId}\nPay ${amount} baht for ${category}${creditCard ? ` using ${creditCard} card` : ''}`
     });
   });
 };
+
+const editSpendingRecord = ({
+  secrets: { AIRTABLE_API_KEY, AIRTABLE_PERSONAL_HELPER_BASE },
+  recordId,
+  category,
+  creditCard,
+  amount,
+  toReply,
+}) => {
+  const base = new Airtable({ apiKey: AIRTABLE_API_KEY }).base(AIRTABLE_PERSONAL_HELPER_BASE);
+  base('SpendingRecords').update(recordId, {
+    category,
+    creditCard,
+    amount,
+  }, (err, record) => {
+    if (err) {
+      console.error(err);
+      return;
+    }
+    const recordId = record.getId();
+    const {
+      amount,
+      category,
+      creditCard
+    } = get(['fields'])(record);
+    toReply({
+      replyMessage: `Updated record id: ${recordId}\nPay ${amount} baht for ${category}${creditCard ? ` using ${creditCard} card` : ''}`
+    });
+  })
+}
 
 const toLineMessage = ({ message }) => {
   if(!message) { message = '...'; }
