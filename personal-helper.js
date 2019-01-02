@@ -188,6 +188,7 @@ const editSpendingRecord = ({
     category,
     creditCard,
     amount,
+    updatedDate: moment.tz('Asia/Bangkok').format(),
   }, (err, record) => {
     if (err) {
       console.error(err);
